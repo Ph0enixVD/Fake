@@ -7,6 +7,10 @@ JC = javac
 CLASSES = \
 	MigratableProcess.java \
 	ProcessManager.java \
+	Message.java \
+	MessageType.java \
+	Server.java \
+	TestThread.java \
 
 default: classes
 
