@@ -1,8 +1,5 @@
-
 public enum MessageType {
-    
-	MsgNewSlaveRequest,
-	MsgNewSlaveResponse,
-	MsgProcess,	
-	
+
+  MsgNewSlaveRequest, MsgResponseSuccess, MsgReponseError, MsgProcessStart, MsgProcessFinish, MsgBalanceRequestSrc, MsgBalanceRequestDst, MsgBalanceResponse,
+
 }

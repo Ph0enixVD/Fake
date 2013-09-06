@@ -1,27 +1,36 @@
-
 public class TestThread implements MigratableProcess {
-	
-	private static final long serialVersionUID = 34122351L;
 
-	public TestThread() {
-	}
+  private static final long serialVersionUID = 34122351L;
 
-	@Override
-	public void run() {
-	   
-		System.out.println("TestThread start to run.");
-		try{
-			for(int i = 0; i < 10; i++) {
-				Thread.sleep(1000);
-			}
-		} catch(Exception e) {
-			//to do
-		}
-		System.out.println("TestThread finish.");
-	}
-	
-	
-	@Override
-	public void suspend() {	
-	}
+  private boolean suspended = false;
+  private int count = 0;
+
+  public TestThread() {
+  }
+
+  @Override
+  public void run() {
+
+    suspended = false;
+
+    while (suspended == false) {
+      try {
+        Thread.sleep(2000);
+        count++;
+      } catch (Exception e) {
+      }
+
+      if (count > 10)
+        break;
+    }
+    if (count > 10)
+      System.out.println("TestThread finish success!");
+    else
+      System.out.println("TestThread suspended!");
+  }
+
+  @Override
+  public void suspend() {
+    suspended = true;
+  }
 }
