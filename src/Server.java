@@ -5,32 +5,32 @@ public class Server implements Serializable, Comparable<Server> {
 
   private static final long serialVersionUID = 1L;
 
-  private HashSet<Integer> threadList;
+  private HashSet<Integer> threadSet;
 
   public Server(String ip, int port) {
     this.IP = ip;
     this.port = port;
-    threadList = new HashSet<Integer>();
+    this.threadSet = new HashSet<Integer>();
   }
 
   private String IP;
   private int port;
 
   public String getIP() {
-    return IP;
+    return this.IP;
   }
 
   public int getPort() {
-    return port;
+    return this.port;
   }
 
-  public HashSet<Integer> getThreadList() {
-    return threadList;
+  public HashSet<Integer> getThreadSet() {
+    return this.threadSet;
   }
 
   @Override
-  public int compareTo(Server ser) {
-    return this.threadList.size() - ser.getThreadList().size();
+  public int compareTo(Server server) {
+    return this.threadSet.size() - server.getThreadSet().size();
   }
 
 }

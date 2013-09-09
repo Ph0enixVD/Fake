@@ -12,6 +12,7 @@ CLASSES = \
 	MessageType.java \
 	Server.java \
 	TestThread.java \
+	GrepThread.java \
 
 default: classes
 

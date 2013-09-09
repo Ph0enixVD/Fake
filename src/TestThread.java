@@ -1,5 +1,4 @@
 public class TestThread implements MigratableProcess {
-
   private static final long serialVersionUID = 34122351L;
 
   private boolean suspended = false;
