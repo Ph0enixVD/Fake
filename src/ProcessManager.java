@@ -16,7 +16,7 @@ import com.google.common.collect.MinMaxPriorityQueue;
 
 /**
  * 
- * @author LI MINGYUAN, LI FANGSHI
+ * @author LI FANGSHI, mingyual
  * 
  */
 public class ProcessManager {
@@ -39,13 +39,13 @@ public class ProcessManager {
   public ProcessManager(boolean isMaster, Server master, Server localhost) {    
     this.isMaster = isMaster;
     if (this.isMaster) {
-      this.masterServerList = MinMaxPriorityQueue.<Server> create();
+      this.masterServerList = MinMaxPriorityQueue.<Server>create();
     } else {
       this.master = master;
       this.localhost = localhost;
-      slaveThreadList = new LinkedList<Thread>();
-      slaveThreadIdMap = new HashMap<Thread, Integer>();
-      slaveThreadMPMap = new HashMap<Thread, MigratableProcess>();
+      this.slaveThreadList = new LinkedList<Thread>();
+      this.slaveThreadIdMap = new HashMap<Thread, Integer>();
+      this.slaveThreadMPMap = new HashMap<Thread, MigratableProcess>();
     }    
   }
 
@@ -58,7 +58,7 @@ public class ProcessManager {
        * msg obj = server obj, which contains addr and port of the slave
        */
       Server slave = (Server) msg.getObj();
-      masterServerList.offer(slave);
+      this.masterServerList.offer(slave);
       System.out.println("MsgNewSlaveRequest processed!");
       
       Message response = new Message(MessageType.MsgResponseSuccess, null, null);
@@ -73,9 +73,9 @@ public class ProcessManager {
       MigratableProcess process = (MigratableProcess)msg.getObj();
       int tID = (int) msg.getArg();
       Thread thread = new Thread(process);
-      slaveThreadList.add(thread);
-      slaveThreadIdMap.put(thread, tID);
-      slaveThreadMPMap.put(thread, process);
+      this.slaveThreadList.add(thread);
+      this.slaveThreadIdMap.put(thread, tID);
+      this.slaveThreadMPMap.put(thread, process);
       thread.start();
       System.out.println("Start thread " + tID + "!");
       System.out.println("MsgProcessStart processed!");
@@ -114,7 +114,7 @@ public class ProcessManager {
       System.out.println("expectedThreadCnt:" + expectedThreadCnt);
       
       Message response = null;
-      if (slaveThreadList.size() != expectedThreadCnt) {
+      if (this.slaveThreadList.size() != expectedThreadCnt) {
         // syn problem. response "NI SHA BI"
         response = new Message(MessageType.MsgReponseError, null, null);
       } else {
@@ -123,16 +123,15 @@ public class ProcessManager {
         for (int i = 0; i < migrateThreadCnt; i++) {
           Thread thread = slaveThreadList.pollLast();
           if (thread != null) {
-            MigratableProcess mp = slaveThreadMPMap.get(thread);
-
             if (thread.isAlive()) {
-              mp.suspend();              
+              MigratableProcess mp = this.slaveThreadMPMap.get(thread);
+              mp.suspend();
               processList.add(mp);
-              idList.add(slaveThreadIdMap.get(thread));
+              idList.add(this.slaveThreadIdMap.get(thread));
             }
-            slaveThreadList.remove(thread);
-            slaveThreadIdMap.remove(thread);
-            slaveThreadMPMap.remove(thread);
+            this.slaveThreadList.remove(thread);
+            this.slaveThreadIdMap.remove(thread);
+            this.slaveThreadMPMap.remove(thread);
           }
         }
         System.out.println("Src ready to migrate " + processList.size() + " Processes!");
@@ -159,9 +158,9 @@ public class ProcessManager {
         MigratableProcess process = processList.pollFirst();
         int tID = idList.pollFirst();
         Thread thread = new Thread(process);
-        slaveThreadList.add(thread);
-        slaveThreadIdMap.put(thread, tID);
-        slaveThreadMPMap.put(thread, process);
+        this.slaveThreadList.add(thread);
+        this.slaveThreadIdMap.put(thread, tID);
+        this.slaveThreadMPMap.put(thread, process);
         thread.start();
         System.out.println("Start to run Thread " + tID + "!");
       }
@@ -205,7 +204,7 @@ public class ProcessManager {
 
     public SocketListener(int port) {      
       try {
-        listener = new ServerSocket(port);
+        this.listener = new ServerSocket(port);
       } catch (Exception e) {
         e.printStackTrace();
       }      
@@ -217,7 +216,7 @@ public class ProcessManager {
           /* 
            * listen until get a connection, and process the message
            */
-        	Socket socket = listener.accept();
+        	Socket socket = this.listener.accept();
         	ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
           Message msg = (Message)in.readObject();
         	if(processMessage(msg, socket) != ProcessManager.SUCCESS) {
@@ -245,18 +244,18 @@ public class ProcessManager {
 
     // Each round we balance load between server with the max and min load
     while (round > 0) {
-      Server dst = masterServerList.peekFirst();
-      Server src = masterServerList.peekLast();
+      Server dst = this.masterServerList.peekFirst();
+      Server src = this.masterServerList.peekLast();
       int min = dst.getThreadSet().size();
       int max = src.getThreadSet().size();
-      int rd = (max - min) / 2;
+      int diff = (max - min) / 2;
 
       System.out.println("Round" + round + " max & min is " + max + " " + min);
-      if (rd < 1)
+      if (diff < 1)
         break;
 
       Message requestSrc = new Message(MessageType.MsgBalanceRequestSrc,
-          (Object) rd, (Object) max);
+          (Object)diff, (Object)max);
       Message responseSrc = sendMessage(src, requestSrc);
       if (responseSrc.getType() != MessageType.MsgBalanceResponse) {
         System.out.println("Load balance skip this round!");
@@ -315,10 +314,9 @@ public class ProcessManager {
           e.printStackTrace();
         }
 
-        threadId++;
-        Server server = addThreadToSlave(threadId);
-        Message msg = new Message(MessageType.MsgProcessStart,
-            (Object) process, (Object) threadId);
+        this.threadId++;
+        Server server = addThreadToSlave(this.threadId);
+        Message msg = new Message(MessageType.MsgProcessStart, (Object)process, (Object)this.threadId);
         sendMessage(server, msg);
       }
     }
@@ -327,11 +325,11 @@ public class ProcessManager {
   }
 
   private void SlaveRun() {
-    SocketListener listener = new SocketListener(localhost.getPort());
+    SocketListener listener = new SocketListener(this.localhost.getPort());
     listener.start();
 
-    Message msg = new Message(MessageType.MsgNewSlaveRequest, localhost, null);
-    if (sendMessage(master, msg).getType() == MessageType.MsgResponseSuccess) {
+    Message msg = new Message(MessageType.MsgNewSlaveRequest, this.localhost, null);
+    if (sendMessage(this.master, msg).getType() == MessageType.MsgResponseSuccess) {
       System.out.println("CONNECT TO MASTER!");
     }
 
@@ -341,21 +339,20 @@ public class ProcessManager {
 
         // todo concurrency
         LinkedList<Thread> removeList = new LinkedList<Thread>();
-        for (Thread thread : slaveThreadList) {
+        for (Thread thread : this.slaveThreadList) {
           if (!thread.isAlive()) {
             removeList.add(thread);
           }
         }
 
         for (Thread thread : removeList) {
-          slaveThreadList.remove(thread);
-          int tid = slaveThreadIdMap.get(thread);
-          slaveThreadIdMap.remove(thread);
-          slaveThreadMPMap.remove(thread);
-          Message m = new Message(MessageType.MsgProcessFinish, null, (Object) tid);
-          sendMessage(master, m);
+          int tid = this.slaveThreadIdMap.get(thread);
+          this.slaveThreadList.remove(thread);
+          this.slaveThreadIdMap.remove(thread);
+          this.slaveThreadMPMap.remove(thread);
+          Message finMsg = new Message(MessageType.MsgProcessFinish, null, (Object) tid);
+          sendMessage(master, finMsg);
         }
-
       } catch (Exception e) {
         e.printStackTrace();
       }
@@ -365,42 +362,40 @@ public class ProcessManager {
   private void debug() {
     System.out.println("Running slaves:");
     for (Server ser : masterServerList) {
-      System.out.println("slave:" + ser.getIP() + " " + ser.getPort() + " "
-          + ser.getThreadSet().size());
+      System.out.println("slave:" + ser.getIP() + " " + ser.getPort() + " " + ser.getThreadSet().size());
     }
   }
 
   private void removeThreadFromSlave(int tid) {
     Server targetSlave = null;
-    for (Server slave : masterServerList) {
+    for (Server slave : this.masterServerList) {
       if (slave.getThreadSet().contains(tid)) {
         targetSlave = slave;
         break;
       }
     }
     if (targetSlave != null) {
-      masterServerList.remove(targetSlave);
+      this.masterServerList.remove(targetSlave);
       targetSlave.getThreadSet().remove(tid);
-      masterServerList.offer(targetSlave);
+      this.masterServerList.offer(targetSlave);
     }
   }
 
   private Server addThreadToSlave(int tid) {
-    Server server = masterServerList.pollLast();
+    Server server = this.masterServerList.pollLast();
     server.getThreadSet().add(tid);
-    masterServerList.offer(server);
+    this.masterServerList.offer(server);
     return server;
   }
   
   private void migrateThreadSet(Server src, Server dst, List<Integer> tidList) {
-    if(src != null && dst != null)
-    {
-      masterServerList.remove(src);
-      masterServerList.remove(dst);
+    if (src != null && dst != null) {
+      this.masterServerList.remove(src);
+      this.masterServerList.remove(dst);
       src.getThreadSet().removeAll(tidList);
       dst.getThreadSet().addAll(tidList);
-      masterServerList.offer(src);
-      masterServerList.offer(dst);
+      this.masterServerList.offer(src);
+      this.masterServerList.offer(dst);
     }
   }
   

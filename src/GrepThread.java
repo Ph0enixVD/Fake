@@ -1,4 +1,4 @@
-import java.io.BufferedReader;
+import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -9,7 +9,7 @@ public class GrepThread implements MigratableProcess {
   private TransactionalFileOutputStream outFile;
   private String query;
   
-  private boolean suspending;
+  private volatile boolean suspending;
   
   public GrepThread() throws Exception {
     this.query = "first";
@@ -19,21 +19,30 @@ public class GrepThread implements MigratableProcess {
   
   public void run()
   {
+    System.out.println("GrepThread started running!");
     PrintStream out = new PrintStream(outFile);
-    BufferedReader in = new BufferedReader(new InputStreamReader(inFile));
+    DataInputStream in = new DataInputStream(inFile);
     
     try {
-      while (!this.suspending) {        
+      while (!this.suspending) {
+        //System.out.println("running, inFile offset:" + inFile.offset);
         String line = in.readLine();
-        if (line == null) break;        
+        if (line == null) {
+          //System.out.println("Line is null!");
+          break;
+        }
+        System.out.println("Line is:" + line);
         if (line.contains(query)) {
+          //System.out.println("running, outFile offset:" + outFile.offset);
           out.println(line);
         }
         
         // Make grep take longer so that we don't require extremely large files for interesting results
         try {
+          System.out.println("ready to sleep 5000!");
           Thread.sleep(5000);
         } catch (InterruptedException e) {
+          System.out.println("sleep interrupted!");
           // Ignore it
         }
       }
@@ -43,9 +52,15 @@ public class GrepThread implements MigratableProcess {
       System.out.println ("GrepProcess: Error: " + e);
     }
     this.suspending = false;
+    //System.out.println("Thread run over!");
   }
   
   public void suspend() {
     this.suspending = true;
+    //System.out.println("Suspend inFile offset:" + inFile.offset);
+    //System.out.println("Suspend outFile offset:" + outFile.offset);
+    while (suspending) {
+      ;
+    }
   }
 }

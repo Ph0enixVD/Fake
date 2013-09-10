@@ -1,7 +1,7 @@
 public class TestThread implements MigratableProcess {
   private static final long serialVersionUID = 34122351L;
 
-  private boolean suspended = false;
+  private volatile boolean suspending;
   private int count = 0;
 
   public TestThread() {
@@ -10,9 +10,9 @@ public class TestThread implements MigratableProcess {
   @Override
   public void run() {
 
-    suspended = false;
+    suspending = false;
 
-    while (suspended == false) {
+    while (suspending == false) {
       try {
         Thread.sleep(2000);
         count++;
@@ -30,6 +30,9 @@ public class TestThread implements MigratableProcess {
 
   @Override
   public void suspend() {
-    suspended = true;
+    suspending = true;
+    while (suspending) {
+      ;
+    }
   }
 }

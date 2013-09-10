@@ -14,9 +14,10 @@ public class TransactionalFileOutputStream extends OutputStream implements Seria
   public void write(int data) {
     try {
       RandomAccessFile file = new RandomAccessFile(this.fileName, "rw");
-      file.seek(offset);
+      file.seek(this.offset);
       file.write(data);
       this.offset++;
+      file.close();
     } catch (Exception e) {
       e.printStackTrace();
     }
