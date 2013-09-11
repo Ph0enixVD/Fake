@@ -11,6 +11,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.collect.MinMaxPriorityQueue;
 
@@ -24,14 +25,16 @@ public class ProcessManager {
   private static final int ERROR = -1;
   private static final int MASTER_PORT = 15619;
   private boolean isMaster;
-  private Server master = null;
-  private Server localhost = null;
+  private Server master;
+  private Server localhost;
   
   // Master
+  private ReentrantLock masterLock;
   private MinMaxPriorityQueue<Server> masterServerList;
   private int threadId = 0;
   
   // Slave
+  private ReentrantLock slaveLock;
   private LinkedList<Thread> slaveThreadList;
   private HashMap<Thread, Integer> slaveThreadIdMap;
   private HashMap<Thread, MigratableProcess> slaveThreadMPMap;
@@ -40,9 +43,11 @@ public class ProcessManager {
     this.isMaster = isMaster;
     if (this.isMaster) {
       this.masterServerList = MinMaxPriorityQueue.<Server>create();
+      this.masterLock = new ReentrantLock();
     } else {
       this.master = master;
       this.localhost = localhost;
+      this.slaveLock = new ReentrantLock();
       this.slaveThreadList = new LinkedList<Thread>();
       this.slaveThreadIdMap = new HashMap<Thread, Integer>();
       this.slaveThreadMPMap = new HashMap<Thread, MigratableProcess>();
@@ -57,9 +62,15 @@ public class ProcessManager {
        * master get from slave, add this server as a slave
        * msg obj = server obj, which contains addr and port of the slave
        */
-      Server slave = (Server) msg.getObj();
-      this.masterServerList.offer(slave);
-      System.out.println("MsgNewSlaveRequest processed!");
+      Server slave = (Server)msg.getObj();
+      this.masterLock.lock();
+      try {
+        this.masterServerList.offer(slave);
+      } finally {
+        this.masterLock.unlock();
+      }
+      //System.out.println("MsgNewSlaveRequest processed!");
+      this.printWithPrompt("MsgNewSlaveRequest processed!");
       
       Message response = new Message(MessageType.MsgResponseSuccess, null, null);
       if (this.sendProcessMessageResponse(response, socket) == false) {
@@ -71,11 +82,16 @@ public class ProcessManager {
        * msg obj = process, msg arg = tid
        */
       MigratableProcess process = (MigratableProcess)msg.getObj();
-      int tID = (int) msg.getArg();
+      int tID = (int)msg.getArg();
       Thread thread = new Thread(process);
-      this.slaveThreadList.add(thread);
-      this.slaveThreadIdMap.put(thread, tID);
-      this.slaveThreadMPMap.put(thread, process);
+      this.slaveLock.lock();
+      try {
+        this.slaveThreadList.add(thread);
+        this.slaveThreadIdMap.put(thread, tID);
+        this.slaveThreadMPMap.put(thread, process);
+      } finally {
+        this.slaveLock.unlock();
+      }
       thread.start();
       System.out.println("Start thread " + tID + "!");
       System.out.println("MsgProcessStart processed!");
@@ -91,11 +107,13 @@ public class ProcessManager {
        */
       int tid = (int)msg.getArg();
       removeThreadFromSlave(tid);
-      System.out.println("MsgProcessFinish processed!");
+      //System.out.println("MsgProcessFinish processed!");
+      this.printWithPrompt("MsgProcessFinish processed!");
       
       Message response = new Message(MessageType.MsgResponseSuccess, null, null);
       if (this.sendProcessMessageResponse(response, socket) == false) {
-        System.out.println("sendProcessMessageResponse failed!");
+        //System.out.println("sendProcessMessageResponse failed!");
+        this.printWithPrompt("sendProcessMessageResponse failed!");
       }
     } else if (type == MessageType.MsgBalanceRequestSrc) {
       /*
@@ -114,32 +132,37 @@ public class ProcessManager {
       System.out.println("expectedThreadCnt:" + expectedThreadCnt);
       
       Message response = null;
-      if (this.slaveThreadList.size() != expectedThreadCnt) {
-        // syn problem. response "NI SHA BI"
-        response = new Message(MessageType.MsgReponseError, null, null);
-      } else {
-        LinkedList<MigratableProcess> processList = new LinkedList<MigratableProcess>();
-        LinkedList<Integer> idList = new LinkedList<Integer>();
-        for (int i = 0; i < migrateThreadCnt; i++) {
-          Thread thread = slaveThreadList.pollLast();
-          if (thread != null) {
-            if (thread.isAlive()) {
-              MigratableProcess mp = this.slaveThreadMPMap.get(thread);
-              mp.suspend();
-              processList.add(mp);
-              idList.add(this.slaveThreadIdMap.get(thread));
+      this.slaveLock.lock();
+      try {
+        if (this.slaveThreadList.size() != expectedThreadCnt) {
+          // syn problem. response "NI SHA BI"
+          response = new Message(MessageType.MsgReponseError, null, null);
+        } else {
+          LinkedList<MigratableProcess> processList = new LinkedList<MigratableProcess>();
+          LinkedList<Integer> idList = new LinkedList<Integer>();
+          for (int i = 0; i < migrateThreadCnt; i++) {
+            Thread thread = slaveThreadList.pollLast();
+            if (thread != null) {
+              if (thread.isAlive()) {
+                MigratableProcess mp = this.slaveThreadMPMap.get(thread);
+                mp.suspend();
+                processList.add(mp);
+                idList.add(this.slaveThreadIdMap.get(thread));
+              }
+              this.slaveThreadList.remove(thread);
+              this.slaveThreadIdMap.remove(thread);
+              this.slaveThreadMPMap.remove(thread);
             }
-            this.slaveThreadList.remove(thread);
-            this.slaveThreadIdMap.remove(thread);
-            this.slaveThreadMPMap.remove(thread);
+          }
+          System.out.println("Src ready to migrate " + processList.size() + " Processes!");
+          if (processList.size() > 0) {
+            response = new Message(MessageType.MsgBalanceResponse, (Object) processList, (Object) idList);
+          } else {
+            response = new Message(MessageType.MsgReponseError, null, null);
           }
         }
-        System.out.println("Src ready to migrate " + processList.size() + " Processes!");
-        if (processList.size() > 0) {
-          response = new Message(MessageType.MsgBalanceResponse, (Object) processList, (Object) idList);
-        } else {
-          response = new Message(MessageType.MsgReponseError, null, null);
-        }
+      } finally {
+        this.slaveLock.unlock();
       }
       System.out.println("MsgBalanceRequestSrc processed!");
       if (this.sendProcessMessageResponse(response, socket) == false) {
@@ -158,9 +181,14 @@ public class ProcessManager {
         MigratableProcess process = processList.pollFirst();
         int tID = idList.pollFirst();
         Thread thread = new Thread(process);
-        this.slaveThreadList.add(thread);
-        this.slaveThreadIdMap.put(thread, tID);
-        this.slaveThreadMPMap.put(thread, process);
+        this.slaveLock.lock();
+        try {
+          this.slaveThreadList.add(thread);
+          this.slaveThreadIdMap.put(thread, tID);
+          this.slaveThreadMPMap.put(thread, process);
+        } finally {
+          this.slaveLock.unlock();
+        }
         thread.start();
         System.out.println("Start to run Thread " + tID + "!");
       }
@@ -184,7 +212,7 @@ public class ProcessManager {
       ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
       out.writeObject(msg);
       out.flush();
-      System.out.println("Send message to " + server.getIP());
+      //System.out.println("Send message to " + server.getIP());
       ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
       Message response = (Message)in.readObject();
       out.close();
@@ -239,34 +267,53 @@ public class ProcessManager {
   }
 
   private void loadBalance() {    
-    System.out.println("Load balance start!");
-    int round = masterServerList.size() / 2;
+    //System.out.println("Load balance start!");
+    this.printWithPrompt("Load balance start!");
+    int round = 0;
+    
+    // The round of load balance we do is 1/2 * NumberOfSlaves
+    this.masterLock.lock();
+    try {
+      round = masterServerList.size() / 2;
+    } finally {
+      this.masterLock.unlock();
+    }
 
     // Each round we balance load between server with the max and min load
     while (round > 0) {
-      Server dst = this.masterServerList.peekFirst();
-      Server src = this.masterServerList.peekLast();
-      int min = dst.getThreadSet().size();
-      int max = src.getThreadSet().size();
-      int diff = (max - min) / 2;
+      Server dst = null;
+      Server src = null;
+      int min = 0;
+      int max = 0;
+      int diff = 0;
+      this.masterLock.lock();
+      try {
+        dst = this.masterServerList.peekFirst();
+        src = this.masterServerList.peekLast();
+        min = dst.getThreadSet().size();
+        max = src.getThreadSet().size();
+        diff = (max - min) / 2;
+      } finally {
+        this.masterLock.unlock();
+      }
 
-      System.out.println("Round" + round + " max & min is " + max + " " + min);
+      //System.out.println("Round" + round + " max & min is " + max + " " + min);
+      this.printWithPrompt("Round" + round + " max & min is " + max + " " + min);
       if (diff < 1)
         break;
 
-      Message requestSrc = new Message(MessageType.MsgBalanceRequestSrc,
-          (Object)diff, (Object)max);
+      Message requestSrc = new Message(MessageType.MsgBalanceRequestSrc, (Object)diff, (Object)max);
       Message responseSrc = sendMessage(src, requestSrc);
       if (responseSrc.getType() != MessageType.MsgBalanceResponse) {
-        System.out.println("Load balance skip this round!");
+        //System.out.println("Load balance skip this round!");
+        this.printWithPrompt("Load balance skip this round!");
         continue;
       }
 
       @SuppressWarnings("unchecked")
       LinkedList<Integer> tidList = (LinkedList<Integer>)responseSrc.getArg();
       migrateThreadSet(src, dst, tidList);
-      Message requestDst = new Message(MessageType.MsgBalanceRequestDst,
-          responseSrc.getObj(), responseSrc.getArg());
+      Message requestDst = new Message(MessageType.MsgBalanceRequestDst, responseSrc.getObj(), responseSrc.getArg());
 
       // error handle
       sendMessage(dst, requestDst);
@@ -287,6 +334,7 @@ public class ProcessManager {
       String input = null;
       try {
         System.out.print(">>>");
+        //this.printWithPrompt("");
         input = reader.readLine();
       } catch (Exception e) {
         e.printStackTrace();
@@ -295,23 +343,31 @@ public class ProcessManager {
       if (input.equals("fake")) {
         debug();
       } else {
-
         if (input.equals("")) {
           continue;
         }
-
-        String[] process_args = input.split(" ");
+        String[] inputStrings = input.split(" ", 2);
+        String[] threadArgs = null;
+        if(inputStrings.length > 1) {
+          // Thread has arguments
+          threadArgs = inputStrings[1].split(" ");
+        }
+        
         MigratableProcess process = null;
-        // to do : false thread name is not handled!
         try {
           @SuppressWarnings("unchecked")
-          Class<MigratableProcess> processClass = (Class<MigratableProcess>) (Class
-              .forName(process_args[0]));
-          Constructor<MigratableProcess> processConstructor = processClass
-              .getConstructor();
-          process = processConstructor.newInstance();
+          Class<MigratableProcess> processClass = (Class<MigratableProcess>)(Class.forName(inputStrings[0]));
+          Constructor<?>[] processConstructor = processClass.getConstructors();
+          if(inputStrings.length == 1) {
+            // Thread has no argument
+            process = (MigratableProcess)processConstructor[0].newInstance();
+          } else {
+            // Thread has arguments
+            process = (MigratableProcess)processConstructor[0].newInstance(new Object[]{threadArgs});
+          }
         } catch (Exception e) {
-          e.printStackTrace();
+          System.out.println("False thread name!");
+          continue;
         }
 
         this.threadId++;
@@ -330,21 +386,24 @@ public class ProcessManager {
 
     Message msg = new Message(MessageType.MsgNewSlaveRequest, this.localhost, null);
     if (sendMessage(this.master, msg).getType() == MessageType.MsgResponseSuccess) {
-      System.out.println("CONNECT TO MASTER!");
+      System.out.println("Connected to Master!");
     }
 
     while (true) {
       try {
         Thread.sleep(30);
-
-        // todo concurrency
-        LinkedList<Thread> removeList = new LinkedList<Thread>();
+      } catch (Exception e) {
+        e.printStackTrace();
+        continue;
+      }
+      LinkedList<Thread> removeList = new LinkedList<Thread>();
+      this.slaveLock.lock();
+      try {
         for (Thread thread : this.slaveThreadList) {
           if (!thread.isAlive()) {
             removeList.add(thread);
           }
         }
-
         for (Thread thread : removeList) {
           int tid = this.slaveThreadIdMap.get(thread);
           this.slaveThreadList.remove(thread);
@@ -353,49 +412,70 @@ public class ProcessManager {
           Message finMsg = new Message(MessageType.MsgProcessFinish, null, (Object) tid);
           sendMessage(master, finMsg);
         }
-      } catch (Exception e) {
-        e.printStackTrace();
+      } finally {
+        this.slaveLock.unlock();
       }
     }
   }
 
   private void debug() {
     System.out.println("Running slaves:");
-    for (Server ser : masterServerList) {
-      System.out.println("slave:" + ser.getIP() + " " + ser.getPort() + " " + ser.getThreadSet().size());
+    this.masterLock.lock();
+    try {
+      for (Server ser : masterServerList) {
+        System.out.println("slave:" + ser.getIP() + " " + ser.getPort() + " " + ser.getThreadSet().size());
+      }
+    } finally {
+      this.masterLock.unlock();
     }
   }
 
   private void removeThreadFromSlave(int tid) {
     Server targetSlave = null;
-    for (Server slave : this.masterServerList) {
-      if (slave.getThreadSet().contains(tid)) {
-        targetSlave = slave;
-        break;
+    this.masterLock.lock();
+    try {
+      for (Server slave : this.masterServerList) {
+        if (slave.getThreadSet().contains(tid)) {
+          targetSlave = slave;
+          break;
+        }
       }
-    }
-    if (targetSlave != null) {
-      this.masterServerList.remove(targetSlave);
-      targetSlave.getThreadSet().remove(tid);
-      this.masterServerList.offer(targetSlave);
+      if (targetSlave != null) {
+        this.masterServerList.remove(targetSlave);
+        targetSlave.getThreadSet().remove(tid);
+        this.masterServerList.offer(targetSlave);
+      }
+    } finally {
+      this.masterLock.unlock();
     }
   }
 
   private Server addThreadToSlave(int tid) {
-    Server server = this.masterServerList.pollLast();
-    server.getThreadSet().add(tid);
-    this.masterServerList.offer(server);
+    Server server = null;
+    this.masterLock.lock();
+    try {
+      server = this.masterServerList.pollLast();
+      server.getThreadSet().add(tid);
+      this.masterServerList.offer(server);
+    } finally {
+      this.masterLock.unlock();
+    }
     return server;
   }
   
   private void migrateThreadSet(Server src, Server dst, List<Integer> tidList) {
     if (src != null && dst != null) {
-      this.masterServerList.remove(src);
-      this.masterServerList.remove(dst);
-      src.getThreadSet().removeAll(tidList);
-      dst.getThreadSet().addAll(tidList);
-      this.masterServerList.offer(src);
-      this.masterServerList.offer(dst);
+      this.masterLock.lock();
+      try {
+        this.masterServerList.remove(src);
+        this.masterServerList.remove(dst);
+        src.getThreadSet().removeAll(tidList);
+        dst.getThreadSet().addAll(tidList);
+        this.masterServerList.offer(src);
+        this.masterServerList.offer(dst);
+      } finally {
+        this.masterLock.unlock();
+      }
     }
   }
   
@@ -411,6 +491,17 @@ public class ProcessManager {
     }
     return true;
   }
+  
+  private void printWithPrompt(String msg) {
+    System.out.println("\n" + msg);
+    System.out.print(">>>");
+  }
+  
+  private static void showUsage() {
+    System.out.println("Usage:");
+    System.out.println("\tMaster: ProcessManager");
+    System.out.println("\tSlave: ProcessManager -c <MasterIP>:<MasterPort>");
+  }
 
   /**
    * @param args
@@ -425,16 +516,16 @@ public class ProcessManager {
     // TODO Auto-generated method stub
     if (args.length == 0) {
       // This is master
-      System.out.println("This is master.");
+      System.out.println("This is Master!");
       ProcessManager manager = new ProcessManager(true, null, null);
       manager.MasterRun();
     } else if (args.length == 2) {
       if (!args[0].equals("-c")) {
-        System.out.println("invalid arg");
+        ProcessManager.showUsage();
         return;
       }
-
-      System.out.println("This is slave.");
+      
+      System.out.println("This is Slave!");
       String[] master_addr = args[1].split(":");
       Server master = new Server(master_addr[0],
           Integer.parseInt(master_addr[1]));
@@ -448,6 +539,8 @@ public class ProcessManager {
       Server slave = new Server(slave_host, slave_port);
       ProcessManager manager = new ProcessManager(false, master, slave);
       manager.SlaveRun();
+    } else {
+      ProcessManager.showUsage();
     }
   }  
 }

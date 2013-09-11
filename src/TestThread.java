@@ -9,9 +9,6 @@ public class TestThread implements MigratableProcess {
 
   @Override
   public void run() {
-
-    suspending = false;
-
     while (suspending == false) {
       try {
         Thread.sleep(2000);
