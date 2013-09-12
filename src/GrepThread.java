@@ -1,10 +1,10 @@
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
 
 public class GrepThread implements MigratableProcess {
+  private static final long serialVersionUID = 1L;
   private TransactionalFileInputStream inFile;
   private TransactionalFileOutputStream outFile;
   private String query;

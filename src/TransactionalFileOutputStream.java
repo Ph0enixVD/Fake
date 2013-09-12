@@ -3,6 +3,7 @@ import java.io.RandomAccessFile;
 import java.io.Serializable;
 
 public class TransactionalFileOutputStream extends OutputStream implements Serializable {
+  private static final long serialVersionUID = 1L;
   String fileName;
   long offset;
   
