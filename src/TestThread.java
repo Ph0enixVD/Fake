@@ -23,6 +23,7 @@ public class TestThread implements MigratableProcess {
       System.out.println("TestThread finish success!");
     else
       System.out.println("TestThread suspended!");
+    this.suspending = false;
   }
 
   @Override
