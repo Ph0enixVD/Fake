@@ -8,7 +8,8 @@ public class TestThread implements MigratableProcess {
 
   @Override
   public void run() {
-    while (suspending == false) {
+    System.out.println("TestThread started running!");
+    while (!this.suspending) {
       try {
         Thread.sleep(2000);
         count++;
