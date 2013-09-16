@@ -222,7 +222,6 @@ public class ProcessManager {
         System.out.println("sendProcessMessageResponse failed!");
         return ProcessManager.ERROR;
       }
-      System.out.println("Exiting");
       System.exit(0);
     }
     return ProcessManager.SUCCESS;
@@ -259,7 +258,6 @@ public class ProcessManager {
       socket.close();
       return response;
     } catch (Exception e) {
-      e.printStackTrace();
       return null;
     }
   }
@@ -305,7 +303,6 @@ public class ProcessManager {
   }
 
   private void loadBalance() {    
-    this.printWithPrompt("Load balance start!");
     int round = 0;
     
     // The round of load balance we do is 1/2 * NumberOfSlaves
@@ -334,7 +331,6 @@ public class ProcessManager {
         this.masterLock.unlock();
       }
 
-      this.printWithPrompt("Round" + round + " max & min is " + max + " " + min);
       if (diff < 1)
         break;
 
@@ -362,6 +358,7 @@ public class ProcessManager {
     SocketListener listener = new SocketListener(MASTER_PORT);
     listener.start();
 
+    System.out.println("This is Master!");
     Timer timer = new Timer();
     timer.schedule(new LoadBalanceTimer(), 10000, 10000);
 
@@ -377,7 +374,7 @@ public class ProcessManager {
         if (input.equals("")) {
           continue;
         }
-        else if (input.equals("debug")) {
+        else if (input.equals("ps")) {
           this.debug();
         }
         else if (input.equals("quit")) {
@@ -389,7 +386,7 @@ public class ProcessManager {
         if(inputStrings.length > 1) {
           // Thread has arguments
           threadArgs = inputStrings[1].split(" ");
-        }          
+        }
         
         @SuppressWarnings("unchecked")
         Class<MigratableProcess> processClass = (Class<MigratableProcess>)(Class.forName(inputStrings[0]));
@@ -405,11 +402,18 @@ public class ProcessManager {
         System.out.println("Invalid input!");
         continue;
       }
-
+      
       this.threadId++;
       Server server = addThreadToSlave(this.threadId);
+      if (server == null) {
+        System.out.println("No Slave found!");
+        this.threadId--;
+        continue;
+      }
       Message msg = new Message(MessageType.MsgProcessStart, (Object)process, (Object)this.threadId);
-      sendMessage(server, msg);
+      if(sendMessage(server, msg) == null) {
+        System.out.println("Failed to Send MsgProcessStart Message!");
+      }
     }
   }
 
@@ -420,8 +424,12 @@ public class ProcessManager {
     Message msg = new Message(MessageType.MsgNewSlaveRequest, this.localhost, null);
     if (sendMessage(this.master, msg).getType() == MessageType.MsgResponseSuccess) {
       System.out.println("Connected to Master!");
+    } else {
+      System.out.println("Failed to connect to Master!");
+      return;
     }
-
+    System.out.println("This is Slave!");
+    
     while (true) {
       try {
         Thread.sleep(30);
@@ -443,7 +451,7 @@ public class ProcessManager {
           this.slaveThreadIdMap.remove(thread);
           this.slaveThreadMPMap.remove(thread);
           Message finMsg = new Message(MessageType.MsgProcessFinish, null, (Object) tid);
-          sendMessage(master, finMsg);
+          sendMessage(this.master, finMsg);
         }
       } finally {
         this.slaveLock.unlock();
@@ -476,7 +484,7 @@ public class ProcessManager {
     try {
       for (Server server : this.masterServerList) {
         Message msg = new Message(MessageType.MsgTerminate, null, null);
-        if (sendMessage(server, msg).getType() == MessageType.MsgResponseSuccess) {
+        if (sendMessage(server, msg).getType() != MessageType.MsgResponseSuccess) {
           System.out.println("Terminate error!");
         }
       }
@@ -513,6 +521,9 @@ public class ProcessManager {
     try {
       // Remove slave Server and add it back to keep MinMaxPriorityQueue working
       server = this.masterServerList.pollLast();
+      if(server == null) {
+        return null;
+      }
       server.getThreadSet().add(tid);
       this.masterServerList.offer(server);
     } finally {
@@ -546,6 +557,7 @@ public class ProcessManager {
   }
   
   private static void showUsage() {
+    System.out.println("Invalid input!");
     System.out.println("Usage:");
     System.out.println("\tMaster: ProcessManager");
     System.out.println("\tSlave: ProcessManager -c <MasterIP>:<MasterPort>");
@@ -563,33 +575,35 @@ public class ProcessManager {
 
     if (args.length == 0) {
       // This is Master
-      System.out.println("This is Master!");
       ProcessManager manager = new ProcessManager(true, null, null);
       manager.MasterRun();
     } else if (args.length == 2) {
       if (!args[0].equals("-c")) {
         // Invalid input
         ProcessManager.showUsage();
-        return;
+        System.exit(0);
       }
       
-      //This is Slave
-      System.out.println("This is Slave!");
-      String[] master_addr = args[1].split(":");
-      Server master = new Server(master_addr[0],
-          Integer.parseInt(master_addr[1]));
-      int slave_port = (int) (1000 * Math.random()) + 10000;
-      String slave_host = null;
       try {
+        //This is Slave
+        String[] master_addr = args[1].split(":");
+        Server master = new Server(master_addr[0],
+            Integer.parseInt(master_addr[1]));
+        int slave_port = (int) (1000 * Math.random()) + 10000;
+        String slave_host = null;
         slave_host = InetAddress.getLocalHost().getHostAddress();
+        Server slave = new Server(slave_host, slave_port);
+        ProcessManager manager = new ProcessManager(false, master, slave);
+        manager.SlaveRun();
       } catch (Exception e) {
-        e.printStackTrace();
+        // Invalid input
+        ProcessManager.showUsage();
+        System.exit(0);
       }
-      Server slave = new Server(slave_host, slave_port);
-      ProcessManager manager = new ProcessManager(false, master, slave);
-      manager.SlaveRun();
     } else {
+      // Invalid input
       ProcessManager.showUsage();
+      System.exit(0);
     }
   }  
 }
